@@ -1,7 +1,7 @@
 {
     "version":            "1",
     "project_name":       "st7789",
-    "project_version":    "1",
+    "project_version":    "610ba80-dirty",
     "project_path":       "C:/Users/elixd/workspace/Rehabilitador",
     "idf_path":           "C:/Espressif/frameworks/esp-idf-v5.1.1",
     "build_dir":          "C:/Users/elixd/workspace/Rehabilitador/build",

@@ -10,12 +10,23 @@
 #include "SensorQMI8658.hpp"  // Ensure this path is correct
 #include "esp_adc/adc_oneshot.h"
 #include "driver/ledc.h"
+
+#include "esp_wifi.h"
+#include "esp_now.h"
+#include "nvs_flash.h"
+#include "esp_event.h"
+#include "esp_netif.h"
+#include "esp_mac.h"
+
 extern "C"
 {
 #include "st7789.h"
 #include "fontx.h"
 }
 
+#define ESP_CHANNEL 1
+uint8_t peer_mac[6]={0x00, 0x11, 0x22, 0x33, 0x44, 0x56};//direccion mac del otro esp32
+uint8_t mac_address[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};//direccion mac de este esp32
 
 uint8_t msg[24];
 char int_string[24];
@@ -40,6 +51,73 @@ float pitch = 0.0, roll = 0.0;
 int adc_raw;
 // VARIABLES DE RUTINA
 int rutina =0;
+#define MAC_ADDR_SIZE 6
+
+//funcion que procesa los datos que recibe del otro esp32
+void recv_cb(const esp_now_recv_info_t * esp_now_info,
+		const uint8_t *data, int data_len){
+	sprintf(int_string,"%s", data);
+	//se agrega el dato recibido a una variable global de tipo string
+}
+//funcion que se ejecuta al enviar un dato
+void send_cb(const uint8_t *mac_addr, esp_now_send_status_t status){
+	if(status==ESP_NOW_SEND_SUCCESS){
+		ESP_LOGI(TAG, "ESP_NOW_SEND_SUCCESS");
+	}
+	else{
+		ESP_LOGW(TAG, "ESP_NOW_SEND_FAIL");
+	}
+	//avisa por consola si el dato se envió correctamente
+}
+//funcion para inicializar el wifi
+void init_wifi(void){
+	wifi_init_config_t wifi_init_config = WIFI_INIT_CONFIG_DEFAULT();
+	esp_netif_init();
+	esp_event_loop_create_default();
+	nvs_flash_init();
+	esp_wifi_init(&wifi_init_config);
+	esp_wifi_set_mode(WIFI_MODE_STA);//modo station
+	esp_wifi_start();
+	ESP_LOGI(TAG, "wifi init complete");
+}
+//funcion para inicializar el protocolo esp-now
+void init_esp_now(void){
+	esp_now_init();
+	esp_now_register_recv_cb(recv_cb);//se agregan las funciones que se ejecutaran al recibir o enviar datos
+	esp_now_register_send_cb(send_cb);
+	ESP_LOGI(TAG, "esp now init complete");
+}
+//funcion para configurar la direccion mac del receptor
+void register_peer(uint8_t *peer_addr){
+	esp_now_peer_info_t esp_now_peer_info={};
+	memcpy(esp_now_peer_info.peer_addr, peer_mac, 6);
+	esp_now_peer_info.channel=ESP_CHANNEL;
+	esp_now_peer_info.ifidx=WIFI_IF_STA;
+	esp_now_add_peer(&esp_now_peer_info);
+	ESP_LOGI(TAG, "register peer init complete");
+}
+//funcion para encviar datos al otro esp32
+void send_data(const uint8_t *data, size_t len) {
+    // Enviar datos al dispositivo receptor
+    esp_now_send(NULL, data, len);
+}
+
+static void get_mac_address()
+{
+    uint8_t mac[MAC_ADDR_SIZE];
+    esp_wifi_get_mac(WIFI_IF_STA, mac);
+    ESP_LOGI("MAC address", "MAC address: %02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
+
+static void set_mac_address(uint8_t *mac)
+{
+    esp_err_t err = esp_wifi_set_mac(WIFI_IF_STA, mac);
+    if (err == ESP_OK) {
+        ESP_LOGI("MAC address", "MAC address successfully");
+    } else {
+        ESP_LOGE("MAC address", "Failed to set MAC address");
+    }
+}
 
 void IRAM_ATTR encoder_isr_handler(void *arg) {
     pulse_count++;
@@ -162,7 +240,7 @@ void rutinas(void *arg){
 	while(true){
 		if(rutina==1){
 			for(int i=0;i<5;i++){
-				ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 830);
+				ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 850);
 				ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
 
 				ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1, 0);
@@ -178,21 +256,21 @@ void rutinas(void *arg){
 
 				while(roll>=-10){}
 
-				ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 830);
+				ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 850);
 				ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
 
 				ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1, 0);
 				ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1);
 
 				while(roll<=0){}
-				rutina =0;
+
 				ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 0);
 				ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
 
 				ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1, 0);
 				ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1);
 			}
-
+			rutina =0;
 		}
 
 		else if(rutina==2){
@@ -220,14 +298,14 @@ void rutinas(void *arg){
 				ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1);
 
 				while(roll<=0){}
-				rutina =0;
+
 				ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 0);
 				ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
 
 				ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1, 0);
 				ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1);
 			}
-
+			rutina =0;
 		}
 	}
 }
@@ -279,6 +357,13 @@ extern "C" void app_main(){
 
 	int data[110]={0};
 
+	init_wifi();
+	init_esp_now();
+	register_peer(peer_mac);
+
+	set_mac_address(mac_address);
+	get_mac_address();
+
     while (true){
     	adc_oneshot_read(adc2_handle, ADC_CHANNEL_6, &adc_raw);
 
@@ -295,6 +380,10 @@ extern "C" void app_main(){
 
     	pitch = atan2(acc.x, sqrt(acc.y * acc.y + acc.z * acc.z)) * 180 / M_PI;
     	roll = atan2(acc.y, sqrt(acc.x * acc.x + acc.z * acc.z)) * 180 / M_PI;
+
+    	//message="a\n";
+		sprintf(int_string,"%.2f\n", roll);
+		send_data((const uint8_t *)int_string, strlen(int_string));
 
     	data[109]=roll*-1;
 
